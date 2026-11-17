@@ -25,6 +25,7 @@ const INDEX: &str = include_str!("index.html");
 const IMAGE_LIMIT: usize = 25 * 1024 * 1024;
 const APP_JS: &str = include_str!("app.js");
 const ZH_CN_JS: &str = include_str!("zh-cn.js");
+const RU_JS: &str = include_str!("ru.js");
 const LOGO: &[u8] = include_bytes!("logo.png");
 const ICON: &[u8] = include_bytes!("icon.png");
 const CHANGELOG: &str = include_str!("../CHANGELOG.md");
@@ -205,6 +206,10 @@ fn router(home: Home, guard: Arc<Guard>, shutdown: CancellationToken) -> Router 
         .route(
             "/i18n/zh-cn.js",
             get(|| async { ([(header::CONTENT_TYPE, "text/javascript; charset=utf-8")], ZH_CN_JS) }),
+        )
+        .route(
+            "/i18n/ru.js",
+            get(|| async { ([(header::CONTENT_TYPE, "text/javascript; charset=utf-8")], RU_JS) }),
         )
         .route("/logo.png", get(|| async { ([(header::CONTENT_TYPE, "image/png")], LOGO) }))
         .route("/icon.png", get(|| async { ([(header::CONTENT_TYPE, "image/png")], ICON) }))
@@ -854,7 +859,11 @@ struct UpdateQuery {
 
 async fn update_status(Query(q): Query<UpdateQuery>) -> Response {
     let now = q.now.is_some();
-    let latest = blocking(move || update::latest(now)).await.ok().flatten();
+    let latest = if update::SELF_UPDATE {
+        blocking(move || update::latest(now)).await.ok().flatten()
+    } else {
+        Some(update::CURRENT.to_string())
+    };
     let available = latest.clone().filter(|v| update::newer(v));
     Json(json!({ "current": update::CURRENT, "latest": latest, "available": available })).into_response()
 }

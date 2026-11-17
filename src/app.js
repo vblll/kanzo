@@ -56,7 +56,27 @@ function noticeVersion(version) {
   if (version !== pageVersion && !document.activeElement?.matches("input, textarea, select")) location.reload();
 }
 
+// The five nouns the board counts, in Russian: one, few, many.
+const RU_PLURALS = {
+  "task": ["задача", "задачи", "задач"],
+  "open task": ["открытая задача", "открытые задачи", "открытых задач"],
+  "project": ["проект", "проекта", "проектов"],
+  "comment": ["комментарий", "комментария", "комментариев"],
+  "computer": ["компьютер", "компьютера", "компьютеров"],
+};
+
+// Russian needs three forms: 1 задача, 2 задачи, 5 задач. The English source word
+// is the key, so the table stays next to the same strings the dictionary uses.
+function pluralRu(n, word) {
+  const forms = RU_PLURALS[word];
+  if (!forms) return `${n} ${DICT?.[word] ?? word}`;
+  const mod10 = n % 10, mod100 = n % 100;
+  const i = mod10 === 1 && mod100 !== 11 ? 0 : mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14) ? 1 : 2;
+  return `${n} ${forms[i]}`;
+}
+
 function plural(n, word) {
+  if (LANG === "ru") return pluralRu(n, word);
   // In zh-CN the noun's translation carries its measure word: 个任务, 条评论, 台电脑.
   const w = DICT?.[word] ?? `${word}${n === 1 ? "" : "s"}`;
   return `${n} ${w}`;
@@ -75,8 +95,11 @@ function localStorageSet(k, v) {
 // source strings, so it runs with no dictionary at all.
 const LANG = (() => {
   const saved = localStorageGet("kanzo.lang");
-  if (saved === "zh-cn" || saved === "en") return saved;
-  return (navigator.language || "").toLowerCase().startsWith("zh") ? "zh-cn" : "en";
+  if (saved === "zh-cn" || saved === "en" || saved === "ru") return saved;
+  const browser = (navigator.language || "").toLowerCase();
+  if (browser.startsWith("zh")) return "zh-cn";
+  if (browser.startsWith("ru")) return "ru";
+  return "en";
 })();
 
 let DICT = null;
@@ -2007,7 +2030,8 @@ $('.settings-pane[data-section="board"]').append(...["Description", "Tags", "URL
   const pane = $('.settings-pane[data-section="board"]');
   const choose = el("select", { class: "field", style: "width:auto", "aria-label": tr("Language"),
                                 onchange: (e) => { localStorageSet("kanzo.lang", e.target.value); location.reload(); } },
-    el("option", { value: "en" }, "English"), el("option", { value: "zh-cn" }, "中文"));
+    el("option", { value: "en" }, "English"), el("option", { value: "zh-cn" }, "中文"),
+    el("option", { value: "ru" }, "Русский"));
   choose.value = LANG;
   pane.insertBefore(el("label", { class: "setting" },
     el("span", { class: "text" }, tr("Language"), el("span", {}, tr("The language of the board's interface"))), choose),
@@ -2106,7 +2130,7 @@ function loadDictionary() {
   if (LANG === "en") return Promise.resolve();
   return new Promise((resolve) => {
     const script = el("script", { src: `/i18n/${LANG}.js` });
-    script.addEventListener("load", () => { try { DICT = ZH_CN; } catch { DICT = null; } resolve(); });
+    script.addEventListener("load", () => { try { DICT = LANG === "ru" ? RU : ZH_CN; } catch { DICT = null; } resolve(); });
     script.addEventListener("error", () => resolve());
     document.head.append(script);
   });
@@ -2117,7 +2141,7 @@ function loadDictionary() {
 // the board's dynamic parts are still empty, so no task content is touched.
 function walkStatic() {
   if (!DICT) return;
-  document.documentElement.lang = LANG === "zh-cn" ? "zh-CN" : "en";
+  document.documentElement.lang = LANG === "zh-cn" ? "zh-CN" : LANG;
   for (const node of document.body.querySelectorAll("*")) {
     for (const attr of ["title", "aria-label", "placeholder"]) {
       const value = node.getAttribute(attr);
