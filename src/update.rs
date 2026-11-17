@@ -11,6 +11,12 @@ use std::time::{Duration, Instant};
 
 pub const CURRENT: &str = env!("CARGO_PKG_VERSION");
 
+/// The fleet build is installed from `github.com/vblll/kanzo` by a pinned tag and
+/// checksum. Running the upstream installer would replace it with the official
+/// binary — with the English-only UI and without the fleet patches — so the
+/// self-update path is off in this fork and updates happen by pin.
+pub const SELF_UPDATE: bool = false;
+
 const RELEASES: &str = "https://github.com/emanuele-em/kanzo/releases/latest/download";
 
 const CHECK_EVERY: Duration = Duration::from_secs(24 * 60 * 60);
@@ -30,6 +36,9 @@ fn curl(url: &str) -> Option<Vec<u8>> {
 }
 
 pub fn latest(now: bool) -> Option<String> {
+    if !SELF_UPDATE {
+        return None;
+    }
     let mut cached = LATEST.lock().unwrap_or_else(|e| e.into_inner());
     if let Some((at, version)) = &*cached
         && !now
@@ -47,11 +56,17 @@ pub fn latest(now: bool) -> Option<String> {
 }
 
 pub fn newer(version: &str) -> bool {
+    if !SELF_UPDATE {
+        return false;
+    }
     let parts = |v: &str| -> Vec<u64> { v.split(['.', '-', '+']).take(3).map(|p| p.parse().unwrap_or(0)).collect() };
     parts(version) > parts(CURRENT)
 }
 
 pub fn install() -> Result<PathBuf, String> {
+    if !SELF_UPDATE {
+        return Err("self-update is off in the fleet build; install the pinned tag from github.com/vblll/kanzo".into());
+    }
     let exe = program().map_err(|e| e.to_string())?;
     // The installer writes to <dir>/bin, so it can only replace a program kept in a bin folder.
     let dir = match exe.parent() {
