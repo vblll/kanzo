@@ -672,6 +672,9 @@ impl Store {
     fn search_seeing(&self, query: &str, limit: Option<usize>, hidden: &[String]) -> Result<Vec<Task>> {
         self.add_has_word()?;
         let filter = Filter::new(query, 2, hidden);
+        if let Some(error) = filter.error.clone() {
+            return Err(Error::Invalid(error));
+        }
         // SQLite reads a negative LIMIT as no limit.
         let limit = limit.map_or(-1, |n| n as i64);
         let sql = format!(
@@ -971,6 +974,9 @@ impl Store {
             self.add_has_word()?;
             Filter::new(query, 3, &self.hidden_properties()?)
         };
+        if let Some(error) = filter.error.clone() {
+            return Err(Error::Invalid(error));
+        }
         let sql = format!(
             "FROM tasks t JOIN projects p ON p.id = t.project_id
              WHERE t.status = ?1 AND t.human = 0 AND (?2 IS NULL OR t.project_id = ?2){}",
@@ -1184,8 +1190,9 @@ const IMAGE_COUNT: &str = "(SELECT count(*) FROM images WHERE task_id = t.id)";
 /// Computed, never stored: reopening a task blocks what waits on it again, with nothing to keep in step.
 const WAITING: &str = "EXISTS (SELECT 1 FROM task_waits w JOIN tasks b ON b.id = w.waits_on_id
     WHERE w.task_id = t.id AND b.status <> 'done')";
-const QUALIFIERS: [&str; 15] = [
+const QUALIFIERS: [&str; 16] = [
     "tag",
+    "prio",
     "status",
     "project",
     "title",
@@ -1210,6 +1217,9 @@ struct Filter {
     sql: String,
     values: Vec<String>,
     first: usize,
+    /// Set when a qualifier had a value it cannot take: the caller turns it into an error instead
+    /// of returning a board that quietly hides everything (`prio:P9`, `prio:abc`, `prio:`).
+    error: Option<String>,
 }
 
 impl Filter {
@@ -1252,6 +1262,20 @@ impl Filter {
     fn qualifier(&mut self, part: &str, hidden: &[String]) -> Option<String> {
         let (negated, part) = part.strip_prefix('-').map_or((false, part), |rest| (true, rest));
         let (name, value) = part.split_once(':')?;
+        // `prio:` is the mirror of `tag:`: the same prefix grammar, the same negation, an exact
+        // level, and an error instead of an empty board when the level does not exist.
+        if name == "prio" {
+            return Some(match priority_level(value) {
+                Some(level) => {
+                    let sql = format!("t.priority = {}", self.bind(&level.to_string()));
+                    if negated { format!("NOT ({sql})") } else { sql }
+                }
+                None => {
+                    self.error = Some(format!("E-KANZO-PRIO-002: unknown priority {value}"));
+                    String::new()
+                }
+            });
+        }
         let property = match name {
             "tag" => "tags",
             "comment" => "comments",
@@ -1333,6 +1357,13 @@ fn range_sql(column: &str, range: &str, side: fn(&str) -> Option<String>) -> Opt
 
 fn number(text: &str) -> Option<String> {
     text.parse::<i64>().ok().map(|n| n.to_string())
+}
+
+/// `prio:` takes what the MCP argument takes: `0`-`4`, `"P0"`-`"P4"` in any case, `"0"`-`"4"`.
+fn priority_level(value: &str) -> Option<i64> {
+    let text = value.trim();
+    let digits = text.strip_prefix(['P', 'p']).unwrap_or(text);
+    digits.parse::<i64>().ok().filter(|n| (0..=4).contains(n))
 }
 
 fn date(text: &str) -> Option<String> {
@@ -1719,6 +1750,39 @@ mod tests {
         assert!(titles("nothing-like-this").is_empty());
         assert_eq!(s.search("", Some(10)).unwrap().len(), 3, "no words: the latest changes");
         assert_eq!(s.search("login", Some(1)).unwrap()[0].id, login.id);
+    }
+
+    #[test]
+    fn the_prio_filter_matches_one_level_and_refuses_anything_else() {
+        let filter = Filter::new("prio:P1", 2, &[]);
+        assert!(filter.sql.contains("t.priority = ?"), "{}", filter.sql);
+        assert_eq!(filter.values, ["1"]);
+        assert!(filter.error.is_none());
+        assert!(Filter::new("prio:3", 2, &[]).sql.contains("t.priority = ?"), "the alias is the same level");
+        assert!(Filter::new("-prio:p0", 2, &[]).sql.contains("NOT (t.priority = ?"), "negation still works");
+        for bad in ["prio:P9", "prio:abc", "prio:"] {
+            let filter = Filter::new(bad, 2, &[]);
+            assert!(filter.sql.is_empty(), "{bad} must not filter quietly");
+            assert!(
+                filter.error.as_deref().is_some_and(|e| e.starts_with("E-KANZO-PRIO-002")),
+                "{bad}: {:?}",
+                filter.error
+            );
+        }
+    }
+
+    #[test]
+    fn a_bad_prio_filter_stops_the_query_instead_of_returning_nothing() {
+        let (_dir, s) = store();
+        let api = s.create_project("api", "", None).unwrap();
+        let task = s.create_task(api.id, "Fix login", "").unwrap();
+        s.update_task(task.id, TaskPatch { priority: Some(1), ..Default::default() }).unwrap();
+        assert_eq!(s.search("prio:P1", Some(10)).unwrap().len(), 1);
+        assert_eq!(s.search("prio:1", Some(10)).unwrap().len(), 1);
+        assert!(s.search("prio:P2", Some(10)).unwrap().is_empty(), "an exact level, not a range");
+        let error = s.search("prio:P9", Some(10)).unwrap_err().to_string();
+        assert!(error.contains("E-KANZO-PRIO-002"), "{error}");
+        assert!(s.next_task_matching(None, "prio:P9").is_err(), "and the agent path too");
     }
 
     #[test]
