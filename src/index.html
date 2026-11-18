@@ -261,6 +261,18 @@ html:not([data-hide~="waiting"]) .card.waiting:not(:hover) { opacity: .6; }
 .card .num:hover, #p-key:hover { color: var(--text); }
 #p-key { cursor: copy; }
 .card .num .dot { width: 6px; height: 6px; }
+
+/* Priority: one badge per level, readable as text even with colors off. */
+.badge {
+  flex: none; font-size: 11px; line-height: 1; padding: 3px 5px; border-radius: 4px;
+  border: 1px solid var(--line); color: var(--muted); font-variant-numeric: tabular-nums;
+}
+.card .badge { margin-top: 1px; }
+.badge.prio-p0 { color: #fff; background: #c92a2a; border-color: #c92a2a; }
+.badge.prio-p1 { color: #fff; background: #e8590c; border-color: #e8590c; }
+.badge.prio-p2 { color: var(--text); background: transparent; }
+.badge.prio-p3 { color: var(--muted); background: transparent; }
+.badge.prio-p4 { color: var(--muted); background: transparent; opacity: .75; }
 .card .tags, .result .tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
 .card .human-mark { flex: none; margin-top: 1px; color: var(--muted); display: inline-flex; }
 .card .human-mark .icon svg { width: 15px; height: 15px; }
@@ -599,6 +611,7 @@ html:not(.ready) aside { visibility: hidden; }
     <textarea class="inline title-input" id="p-title" rows="1" spellcheck="false" placeholder="Task title"></textarea>
     <div class="props">
       Status <span><select class="field" id="p-status"></select></span>
+      <div data-prop="priority">Priority <span><select class="field" id="p-prio" aria-label="Priority"></select></span></div>
       <div data-prop="tags">Tags <span><input class="inline" id="p-tags" placeholder="Add tags, like bug, ui" autocomplete="off" spellcheck="false"></span></div>
       <div data-prop="url">URL <span><input class="inline" id="p-url" type="url" placeholder="Add a link, like a pull request" autocomplete="off" spellcheck="false"></span></div>
       <div data-prop="human">Human <span class="human-field"><label class="switch"><input type="checkbox" id="p-human" aria-label="Human task"><span></span></label><span class="hint">Agents skip it</span></span></div>

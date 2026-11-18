@@ -65,6 +65,10 @@ const RU_PLURALS = {
   "computer": ["компьютер", "компьютера", "компьютеров"],
 };
 
+// The fleet's priority scale, agreed 2026-11-18: values are the stored ones, the
+// labels come from the board so this list only fixes the order and the range.
+const PRIORITY_LEVELS = [0, 1, 2, 3, 4];
+
 // Russian needs three forms: 1 задача, 2 задачи, 5 задач. The English source word
 // is the key, so the table stays next to the same strings the dictionary uses.
 function pluralRu(n, word) {
@@ -1060,6 +1064,7 @@ function card(t, showProject, row) {
                            onclick: (e) => { if (e.metaKey || e.ctrlKey) toggleSelected(t.id); else openTask(t.id); } },
     row ? statusIcon(t.status) : null,
     el("div", { class: "head" },
+      el("span", { class: `badge prio-p${t.priority}`, title: t.priority_label, "aria-label": tr("Priority: {0}", t.priority_label) }, `P${t.priority}`),
       el("div", { class: "title" }, t.title),
       t.human ? el("span", { class: "human-mark", title: tr("Human task: agents skip it") }, icon("human")) : null,
       el("span", { class: "num", title: tr("Copy {0}", key(t)), onclick: (e) => { e.stopPropagation(); copyKey(key(t)); } },
@@ -1290,6 +1295,17 @@ async function refreshTask() {
   status.replaceChildren(...statuses.map((s) => el("option", { value: s }, s)));
   if (!statuses.includes(task.status)) status.append(el("option", { value: task.status }, task.status));
   status.value = task.status;
+  // Priorities are a fleet convention P0…P4; the label comes from the server so the board,
+  // the MCP replies and this select never disagree about what a level means.
+  const prio = $("#p-prio");
+  if (prio.options.length !== PRIORITY_LEVELS.length) {
+    prio.replaceChildren(...PRIORITY_LEVELS.map((p) => el("option", { value: String(p) }, tr("P{0}", p))));
+  }
+  for (const option of prio.options) {
+    const level = Number(option.value);
+    option.textContent = level === task.priority ? task.priority_label : tr("P{0}", level);
+  }
+  prio.value = String(task.priority);
   $("#p-human").checked = task.human;
   $("#p-waits-links").replaceChildren(...waits_on.map(taskLink));
   $("#p-blocks").replaceChildren(...blocks.map(taskLink));
@@ -1450,6 +1466,7 @@ $("#p-desc-view").addEventListener("mousedown", (e) => { if (e.target.closest("a
 $("#p-desc-view").addEventListener("focus", editDesc);
 
 $("#p-status").addEventListener("change", (e) => patchTask({ status: e.target.value }));
+$("#p-prio").addEventListener("change", (e) => patchTask({ priority: Number(e.target.value) }));
 $("#p-human").addEventListener("change", (e) => patchTask({ human: e.target.checked }));
 
 let pending = [];

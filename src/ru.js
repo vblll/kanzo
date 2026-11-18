@@ -168,6 +168,9 @@ const RU = {
   "Name": "Название", 
   "GitHub owner/repo (optional)": "GitHub owner/repo (необязательно)", 
   "GitHub repo": "Репозиторий GitHub", 
+  "Priority": "Приоритет", 
+  "Priority: {0}": "Приоритет: {0}", 
+  "P{0}": "P{0}", 
   "Letters, digits and -, up to 32": "Буквы, цифры и -, до 32 символов", 
   "Cancel": "Отмена", 
   "Create": "Создать"

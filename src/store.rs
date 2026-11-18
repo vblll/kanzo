@@ -635,7 +635,15 @@ impl Store {
             .collect::<rusqlite::Result<_>>()?;
         self.add_waiting(&mut tasks)?;
         let column = |t: &Task| self.statuses().iter().position(|s| *s == t.status).unwrap_or(usize::MAX);
-        tasks.sort_by_key(column);
+        // Inside a column the most urgent task comes first, then the drag order. `next_task`
+        // keeps its own rule (position only): urgency is a board and list_tasks thing.
+        tasks.sort_by(|a, b| {
+            column(a)
+                .cmp(&column(b))
+                .then(a.priority.cmp(&b.priority))
+                .then(a.position.total_cmp(&b.position))
+                .then(a.id.cmp(&b.id))
+        });
         let hidden = match keep_done {
             Some(keep) if status.is_none_or(|s| s == done) => {
                 let all: i64 = self.conn.query_row(
