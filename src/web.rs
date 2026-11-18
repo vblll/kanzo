@@ -946,10 +946,15 @@ mod tests {
 
     #[test]
     fn changelog_is_for_this_version() {
-        let heading = format!("## {}", update::CURRENT);
+        // The fleet tag carries the upstream base plus our suffix (`0.4.2+ru.2`), while the
+        // changelog keeps upstream's headings, so compare against the base version.
+        let base = update::CURRENT.split('+').next().unwrap_or(update::CURRENT);
+        let own = format!("## {}", update::CURRENT);
+        let upstream = format!("## {base}");
+        let first = CHANGELOG.lines().next().unwrap_or("");
         assert!(
-            CHANGELOG.lines().next() == Some(heading.as_str()),
-            "CHANGELOG.md should start with the notes for this release"
+            first == own || first == upstream,
+            "CHANGELOG.md should start with the notes for this release, got {first:?}"
         );
     }
 

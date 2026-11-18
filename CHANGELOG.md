@@ -1,3 +1,11 @@
+## 0.4.2+ru.2
+
+### Fleet build
+
+Priority field `priority` (0-4 or `P#`), a `prio:` filter, the level on the
+card and in the task panel, and the level in both export formats. Schema
+version 10; an existing board migrates with every task at `P2`.
+
 ## 0.4.2
 
 ### Bug fixes

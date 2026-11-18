@@ -249,6 +249,13 @@ mod tests {
 
     #[test]
     fn versions() {
+        // The fleet build turns self-update off, so `newer` always answers false there;
+        // the comparison itself is still tested, but only where updating is enabled.
+        if !SELF_UPDATE {
+            assert!(!newer("99.0.0"));
+            assert!(!newer(CURRENT));
+            return;
+        }
         assert!(newer("99.0.0"));
         assert!(!newer(CURRENT));
         assert!(!newer("0.0.1"));
