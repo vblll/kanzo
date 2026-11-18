@@ -39,6 +39,8 @@ struct TaskOut {
     human: bool,
     waits_on: Vec<String>,
     images: Vec<String>,
+    priority: i64,
+    priority_label: String,
     status: String,
     created_at: String,
     updated_at: String,
@@ -57,6 +59,8 @@ impl TaskOut {
             human: task.human,
             waits_on,
             images,
+            priority: task.priority,
+            priority_label: task.priority_label.clone(),
             status: task.status,
             created_at: task.created_at,
             updated_at: task.updated_at,
@@ -144,6 +148,7 @@ fn markdown(board: &Board) -> String {
                 if t.human {
                     md.push_str("Human task.\n");
                 }
+                let _ = writeln!(md, "Priority: {} ({}).", t.priority, t.priority_label);
                 if !t.tags.is_empty() {
                     let _ = writeln!(md, "Tags: {}.", t.tags.join(", "));
                 }
