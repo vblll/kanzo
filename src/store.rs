@@ -59,6 +59,9 @@ const MIGRATIONS: &[&str] = &[
 ];
 
 /// The five levels of the fleet priority scale, as the display label for each.
+/// The level a task gets when nobody says otherwise: `P2`, the normal queue.
+pub const PRIORITY_DEFAULT: i64 = 2;
+
 /// One function for the label, so the board, the MCP answers and `export` never disagree.
 pub fn priority_label(priority: i64) -> &'static str {
     match priority {
@@ -741,9 +744,18 @@ impl Store {
         let id = self.write(|c| {
             let position = Self::end_of_column(c, status, 0)?;
             c.execute(
-                "INSERT INTO tasks (project_id, title, description, status, position, tags, human) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                params![project_id, title, description, status, position, tags, patch.human.unwrap_or(false)],
+                "INSERT INTO tasks (project_id, title, description, status, position, tags, human, priority) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                params![
+                    project_id,
+                    title,
+                    description,
+                    status,
+                    position,
+                    tags,
+                    patch.human.unwrap_or(false),
+                    patch.priority.unwrap_or(PRIORITY_DEFAULT)
+                ],
             )?;
             let id = c.last_insert_rowid();
             if let Some(keys) = &patch.waits_on {
@@ -811,10 +823,11 @@ impl Store {
                 &format!(
                     "UPDATE tasks SET title = coalesce(?1, title), project_id = coalesce(?2, project_id),
                        human = coalesce(?3, human), tags = coalesce(?4, tags),
-                       description = coalesce(?5, description), url = coalesce(?7, url), updated_at = {NOW}
+                       description = coalesce(?5, description), url = coalesce(?7, url),
+                       priority = coalesce(?8, priority), updated_at = {NOW}
                      WHERE id = ?6 AND (coalesce(?1, title), coalesce(?2, project_id), coalesce(?3, human),
-                       coalesce(?4, tags), coalesce(?5, description), coalesce(?7, url))
-                       <> (title, project_id, human, tags, description, url)"
+                       coalesce(?4, tags), coalesce(?5, description), coalesce(?7, url), coalesce(?8, priority))
+                       <> (title, project_id, human, tags, description, url, priority)"
                 ),
                 params![
                     title,
@@ -823,7 +836,8 @@ impl Store {
                     tags,
                     patch.description.as_deref().map(str::trim),
                     id,
-                    url
+                    url,
+                    patch.priority
                 ],
             )?;
             if let Some(s) = &patch.status

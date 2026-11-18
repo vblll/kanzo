@@ -182,6 +182,43 @@ enum TaskKey {
     Text(String),
 }
 
+/// A priority as it arrives: `2` and `"P2"` both mean the same level. `Other` catches what neither
+/// variant takes (a float, a bool) so the caller still gets E-KANZO-PRIO-001 instead of a protocol
+/// error that says nothing about the allowed values.
+#[derive(Deserialize, JsonSchema)]
+#[serde(untagged)]
+enum PriorityKey {
+    Number(i64),
+    Text(String),
+    Other(serde_json::Value),
+}
+
+impl PriorityKey {
+    /// What the caller wrote, for the error message.
+    fn raw(&self) -> String {
+        match self {
+            Self::Number(n) => n.to_string(),
+            Self::Text(s) => s.clone(),
+            Self::Other(v) => v.to_string(),
+        }
+    }
+}
+
+/// `0`-`4`, `"P0"`-`"P4"` (any case, spaces trimmed) or `"0"`-`"4"`; the display label `"P1 · Срочно"`
+/// is an output, not an input, so it is refused like any other text.
+fn priority_of(key: &PriorityKey) -> Result<i64, String> {
+    let taken = match key {
+        PriorityKey::Number(n) => Some(*n).filter(|n| (0..=4).contains(n)),
+        PriorityKey::Text(text) => {
+            let text = text.trim();
+            let digits = text.strip_prefix(['P', 'p']).unwrap_or(text);
+            digits.parse::<i64>().ok().filter(|n| (0..=4).contains(n))
+        }
+        PriorityKey::Other(_) => None,
+    };
+    taken.ok_or_else(|| format!("E-KANZO-PRIO-001: priority must be 0-4 or P0-P4, got {}", key.raw()))
+}
+
 impl TaskKey {
     fn find(&self, store: &Store) -> store::Result<Task> {
         match self {
@@ -206,8 +243,8 @@ struct ListTasksArgs {
     project: Option<String>,
     /// One column, or "all". Done is left out by default.
     status: Option<String>,
-    /// Words, or tag: status: project: title: description: url: comment: id: comments: images: created: updated:
-    /// is:human is:waiting has: no:, like tag:bug -status:done. Includes done.
+    /// Words, or tag: status: project: title: description: url: comment: prio: id: comments: images:
+    /// created: updated: is:human is:waiting has: no:, like tag:bug prio:P1 -status:done. Includes done.
     filter: Option<String>,
 }
 
@@ -233,6 +270,9 @@ struct CreateTaskArgs {
     human: Option<bool>,
     /// Tasks it waits on, like api#12.
     waits_on: Option<String>,
+    /// The fleet scale, 0-4 or P0-P4; defaults to 2.
+    #[schemars(with = "String")]
+    priority: Option<PriorityKey>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -253,6 +293,9 @@ struct UpdateTaskArgs {
     url: Option<String>,
     /// Tasks it waits on, like api#12; "" clears.
     waits_on: Option<String>,
+    /// The fleet scale, 0-4 or P0-P4; leave it out to keep the level as it is.
+    #[schemars(with = "String")]
+    priority: Option<PriorityKey>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -484,10 +527,14 @@ impl Kanzo {
     ) -> Result<CallToolResult, ErrorData> {
         Ok(self
             .run_for(&ext, move |ctx, store| {
-                let CreateTaskArgs { title, description, project, tags, status, human, waits_on } = args;
+                let CreateTaskArgs { title, description, project, tags, status, human, waits_on, priority } = args;
                 let project = ctx.project(store, project.as_deref())?;
                 let status = status.map(|s| s.trim().to_ascii_lowercase()).filter(|s| !s.is_empty());
-                let patch = TaskPatch { description, status, tags, human, waits_on, ..Default::default() };
+                let priority = Some(match &priority {
+                    Some(key) => priority_of(key).map_err(store::Error::Invalid)?,
+                    None => store::PRIORITY_DEFAULT,
+                });
+                let patch = TaskPatch { description, status, tags, human, waits_on, priority, ..Default::default() };
                 let t = store.create_task_in(project.id, &title, patch)?;
                 Ok(format!("Created {} in {}: {}{}", t.key(), t.status, t.title, waits_note(store, &t)?))
             })
@@ -500,6 +547,8 @@ impl Kanzo {
             .run(move |_, store| {
                 let before = args.id.find(store)?;
                 let status = args.status.map(|s| s.trim().to_ascii_lowercase());
+                // Checked before the write, so a bad level cannot change anything else either.
+                let priority = args.priority.as_ref().map(priority_of).transpose().map_err(store::Error::Invalid)?;
                 let after = store.update_task(
                     before.id,
                     TaskPatch {
@@ -509,7 +558,7 @@ impl Kanzo {
                         tags: args.tags,
                         project_id: None,
                         human: args.human,
-                        priority: None,
+                        priority,
                         url: args.url,
                         waits_on: args.waits_on,
                     },
@@ -625,7 +674,7 @@ fn shown(hidden: &[String], property: &str) -> bool {
 }
 
 fn task_line(out: &mut String, t: &Task, hidden: &[String]) {
-    let _ = write!(out, "{} [{}] {}", t.key(), t.status, t.title);
+    let _ = write!(out, "{} [{}] {} {}", t.key(), t.status, t.priority_label, t.title);
     if shown(hidden, "tags") {
         write_tags(out, t);
     }
@@ -689,6 +738,7 @@ fn task_detail(ctx: &Ctx, store: &Store, t: &Task) -> store::Result<String> {
     if updated != created && shown(&hidden, "updated") {
         let _ = write!(out, ", updated {updated}");
     }
+    let _ = write!(out, "\npriority: {}", t.priority_label);
     if !t.url.is_empty() && shown(&hidden, "url") {
         let _ = write!(out, "\nurl: {}", t.url);
     }
