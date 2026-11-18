@@ -509,6 +509,7 @@ impl Kanzo {
                         tags: args.tags,
                         project_id: None,
                         human: args.human,
+                        priority: None,
                         url: args.url,
                         waits_on: args.waits_on,
                     },

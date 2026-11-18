@@ -54,7 +54,36 @@ const MIGRATIONS: &[&str] = &[
      CREATE TRIGGER task_waits_insert AFTER INSERT ON task_waits BEGIN UPDATE meta SET value = value + 1 WHERE key = 'changes'; END;
      CREATE TRIGGER task_waits_delete AFTER DELETE ON task_waits BEGIN UPDATE meta SET value = value + 1 WHERE key = 'changes'; END;",
     "ALTER TABLE projects ADD COLUMN position REAL;",
+    // The fleet priority scale P0-P4 as a carrier column: 0 is the highest, 2 is the default.
+    "ALTER TABLE tasks ADD COLUMN priority INTEGER NOT NULL DEFAULT 2;",
 ];
+
+/// The five levels of the fleet priority scale, as the display label for each.
+/// One function for the label, so the board, the MCP answers and `export` never disagree.
+pub fn priority_label(priority: i64) -> &'static str {
+    match priority {
+        0 => "P0 · Стоп-работы",
+        1 => "P1 · Срочно",
+        2 => "P2 · Обычная (default)",
+        3 => "P3 · Низкий",
+        4 => "P4 · Идеи / бэклог",
+        _ => "P? · Неизвестно",
+    }
+}
+
+/// The label of the migration that adds `tasks.priority`; it is the idempotency guard's subject.
+const PRIORITY_MIGRATION: &str = "ALTER TABLE tasks ADD COLUMN priority INTEGER NOT NULL DEFAULT 2;";
+
+fn has_column(c: &Connection, table: &str, column: &str) -> rusqlite::Result<bool> {
+    let mut stmt = c.prepare(&format!("PRAGMA table_info({table})"))?;
+    let mut rows = stmt.query([])?;
+    while let Some(row) = rows.next()? {
+        if row.get::<_, String>(1)? == column {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
 
 const PROJECT_COLORS: &[&str] = &["gray", "red", "orange", "yellow", "green", "teal", "blue", "purple", "pink"];
 
@@ -118,6 +147,10 @@ pub struct Task {
     pub human: bool,
     pub status: String,
     pub position: f64,
+    /// The fleet priority scale: 0 (P0, stop-work) to 4 (P4, ideas), 2 by default.
+    pub priority: i64,
+    /// The display label of `priority`, from [`priority_label`], so every surface agrees.
+    pub priority_label: String,
     pub created_at: String,
     pub updated_at: String,
     pub comments: i64,
@@ -167,6 +200,8 @@ pub struct TaskPatch {
     pub tags: Option<String>,
     pub url: Option<String>,
     pub human: Option<bool>,
+    /// The fleet priority scale, 0-4; `None` leaves it as it is.
+    pub priority: Option<i64>,
     /// Task keys, comma-separated; it replaces the list.
     pub waits_on: Option<String>,
 }
@@ -298,7 +333,16 @@ impl Store {
                     "this board was saved by a newer version of Kanzo; update this one with `kanzo update`".into(),
                 ));
             }
-            for sql in &MIGRATIONS[version..] {
+            // A column added by hand, or a run that committed the DDL but not the version:
+            // raise the version instead of failing on `duplicate column name` (design D4).
+            let skip_priority =
+                version < latest && version + 1 == latest && has_column(c, "tasks", "priority")?;
+            if skip_priority {
+                eprintln!(
+                    "kanzo: tasks.priority already exists; raising schema_version to {latest} without re-adding it"
+                );
+            }
+            for sql in MIGRATIONS[version..].iter().filter(|sql| !(skip_priority && **sql == PRIORITY_MIGRATION)) {
                 c.execute_batch(sql)?;
             }
             c.execute(
@@ -517,10 +561,11 @@ impl Store {
 
     const TASK_SELECT: &str = "SELECT t.id, p.slug, t.title, t.description, t.status, t.position,
             t.created_at, t.updated_at, (SELECT count(*) FROM comments c WHERE c.task_id = t.id), t.tags, t.human,
-            t.url
+            t.url, t.priority
         FROM tasks t JOIN projects p ON p.id = t.project_id";
 
     fn task_row(r: &Row) -> rusqlite::Result<Task> {
+        let priority: i64 = r.get(12)?;
         Ok(Task {
             id: r.get(0)?,
             project: r.get(1)?,
@@ -531,6 +576,8 @@ impl Store {
             human: r.get(10)?,
             status: r.get(4)?,
             position: r.get(5)?,
+            priority,
+            priority_label: priority_label(priority).to_string(),
             created_at: r.get(6)?,
             updated_at: r.get(7)?,
             comments: r.get(8)?,
