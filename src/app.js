@@ -1306,6 +1306,13 @@ async function refreshTask() {
     option.textContent = level === task.priority ? task.priority_label : tr("P{0}", level);
   }
   prio.value = String(task.priority);
+  // The panel shows the level the way the card does: a coloured badge plus the level's own name,
+  // both from the server, so nobody has to remember that 0 is the most urgent.
+  const prioBadge = $("#p-prio-badge");
+  prioBadge.className = `badge prio-p${task.priority}`;
+  prioBadge.textContent = `P${task.priority}`;
+  prioBadge.title = task.priority_label;
+  $("#p-prio-label").textContent = task.priority_label;
   $("#p-human").checked = task.human;
   $("#p-waits-links").replaceChildren(...waits_on.map(taskLink));
   $("#p-blocks").replaceChildren(...blocks.map(taskLink));

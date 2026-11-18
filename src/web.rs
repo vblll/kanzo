@@ -614,6 +614,30 @@ async fn get_task(State(home): Shared, Path(id): Path<i64>) -> Response {
     .await
 }
 
+/// Reads the panel's `priority`: the stored level `2` and the label form `"P2"` both mean the same
+/// thing. Anything else is refused with the code MCP gives, before the write, so a bad level never
+/// changes a task — the panel cannot save what the rest of the fleet would not understand.
+fn priority_level(raw: Option<serde_json::Value>) -> store::Result<Option<i64>> {
+    let raw = match raw {
+        None | Some(serde_json::Value::Null) => return Ok(None),
+        Some(raw) => raw,
+    };
+    let level = match &raw {
+        serde_json::Value::Number(n) => n.as_i64(),
+        serde_json::Value::String(text) => {
+            let text = text.trim();
+            text.strip_prefix(['P', 'p']).unwrap_or(text).parse::<i64>().ok()
+        }
+        _ => None,
+    };
+    match level {
+        Some(n) if (0..=4).contains(&n) => Ok(Some(n)),
+        _ => Err(Error::Invalid(format!(
+            "E-KANZO-PRIO-001: priority must be 0-4 or P0-P4, got {raw}"
+        ))),
+    }
+}
+
 #[derive(Deserialize)]
 struct Patch {
     title: Option<String>,
@@ -624,10 +648,14 @@ struct Patch {
     human: Option<bool>,
     url: Option<String>,
     waits_on: Option<String>,
+    /// The fleet scale as JSON, 0-4 or P0-P4; absent keeps the level as it is.
+    #[serde(default)]
+    priority: Option<serde_json::Value>,
 }
 
 async fn update_task(State(home): Shared, Path(id): Path<i64>, Json(p): Json<Patch>) -> Response {
     with_store(home, move |_, s| {
+        let priority = priority_level(p.priority)?;
         let project_id = p.project.map(|slug| s.find_project(&slug)).transpose()?.map(|p| p.id);
         s.update_task(
             id,
@@ -638,7 +666,7 @@ async fn update_task(State(home): Shared, Path(id): Path<i64>, Json(p): Json<Pat
                 project_id,
                 tags: p.tags,
                 human: p.human,
-                priority: None,
+                priority,
                 url: p.url,
                 waits_on: p.waits_on,
             },
@@ -946,7 +974,7 @@ mod tests {
 
     #[test]
     fn changelog_is_for_this_version() {
-        // The fleet tag carries the upstream base plus our suffix (`0.4.2+ru.2`), while the
+        // The fleet tag carries the upstream base plus our suffix (`0.4.2+ru.3`), while the
         // changelog keeps upstream's headings, so compare against the base version.
         let base = update::CURRENT.split('+').next().unwrap_or(update::CURRENT);
         let own = format!("## {}", update::CURRENT);
@@ -1009,6 +1037,54 @@ mod tests {
             #[cfg(unix)]
             assert_eq!(open_from(&home, None, file).await, "200");
         });
+    }
+
+    /// One request to a freshly served board, answered with its status code.
+    async fn request(home: &Home, method: &str, path: &str, body: serde_json::Value) -> String {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let guard = Arc::new(Guard::new(port, Ipv4Addr::LOCALHOST.into(), Net::Private));
+        let app = router(home.clone(), guard, CancellationToken::new());
+        tokio::spawn(async move { axum::serve(listener, app).await });
+        let body = body.to_string();
+        let mut conn = tokio::net::TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+        let head = format!(
+            "{method} {path} HTTP/1.0\r\nHost: 127.0.0.1:{port}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n",
+            body.len()
+        );
+        conn.write_all(format!("{head}{body}").as_bytes()).await.unwrap();
+        let mut reply = String::new();
+        conn.read_to_string(&mut reply).await.unwrap();
+        reply.split(' ').nth(1).unwrap().to_string()
+    }
+
+    #[test]
+    fn the_panel_saves_a_priority_and_refuses_a_level_it_cannot_read() {
+        let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        runtime.block_on(async {
+            let tmp = tempfile::tempdir().unwrap();
+            let home = Home::open(tmp.path().to_path_buf()).unwrap();
+            let project = home.store().unwrap().create_project("api", "", None).unwrap();
+            let task = home.store().unwrap().create_task(project.id, "Ship it", "").unwrap();
+            assert_eq!(task.priority, 2, "the scale's default is the ordinary level");
+
+            let path = format!("/api/tasks/{}", task.id);
+            assert_eq!(request(&home, "PATCH", &path, json!({ "priority": "P0" })).await, "200");
+            assert_eq!(home.store().unwrap().get_task(task.id).unwrap().priority, 0);
+            assert_eq!(request(&home, "PATCH", &path, json!({ "priority": 3 })).await, "200");
+            assert_eq!(home.store().unwrap().get_task(task.id).unwrap().priority, 3);
+
+            // A level nobody can read is refused with the fleet's own code, and nothing changes.
+            assert_eq!(request(&home, "PATCH", &path, json!({ "priority": 9 })).await, "400");
+            assert_eq!(request(&home, "PATCH", &path, json!({ "priority": "P9" })).await, "400");
+            assert_eq!(home.store().unwrap().get_task(task.id).unwrap().priority, 3);
+        });
+    }
+
+    #[test]
+    fn the_panel_shows_the_level_as_a_badge_and_its_name() {
+        assert!(INDEX.contains(r#"id="p-prio-badge""#), "the panel has the badge");
+        assert!(INDEX.contains(r#"id="p-prio-label""#), "and the level's own name next to it");
     }
 
     #[test]

@@ -1,3 +1,12 @@
+## 0.4.2+ru.3
+
+### Fleet build
+
+The task panel now saves the level it shows: `PATCH /api/tasks/<id>` accepts
+`priority` in both shapes (`2` and `"P2"`), refuses anything else with
+`E-KANZO-PRIO-001` before the write, and the panel carries the level's badge and
+name next to its `select`.
+
 ## 0.4.2+ru.2
 
 ### Fleet build

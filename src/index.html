@@ -278,6 +278,8 @@ html:not([data-hide~="waiting"]) .card.waiting:not(:hover) { opacity: .6; }
 .card .human-mark .icon svg { width: 15px; height: 15px; }
 .human-field { display: flex; align-items: center; gap: 10px; }
 .props .human-field .hint { color: var(--faint); font-size: 12px; }
+.props .prio-field { display: flex; align-items: center; gap: 8px; }
+.props .prio-field .hint { color: var(--muted); font-size: 12px; white-space: nowrap; }
 .switch { position: relative; display: inline-flex; width: 34px; height: 20px; flex: none; }
 .switch input { position: absolute; inset: 0; margin: 0; opacity: 0; cursor: pointer; }
 .switch span { flex: 1; border-radius: 99px; background: var(--active); transition: background .15s; }
@@ -611,7 +613,7 @@ html:not(.ready) aside { visibility: hidden; }
     <textarea class="inline title-input" id="p-title" rows="1" spellcheck="false" placeholder="Task title"></textarea>
     <div class="props">
       Status <span><select class="field" id="p-status"></select></span>
-      <div data-prop="priority">Priority <span><select class="field" id="p-prio" aria-label="Priority"></select></span></div>
+      <div data-prop="priority">Priority <span class="prio-field"><span class="badge" id="p-prio-badge" title="" aria-hidden="true"></span><span class="hint" id="p-prio-label"></span><select class="field" id="p-prio" aria-label="Priority"></select></span></div>
       <div data-prop="tags">Tags <span><input class="inline" id="p-tags" placeholder="Add tags, like bug, ui" autocomplete="off" spellcheck="false"></span></div>
       <div data-prop="url">URL <span><input class="inline" id="p-url" type="url" placeholder="Add a link, like a pull request" autocomplete="off" spellcheck="false"></span></div>
       <div data-prop="human">Human <span class="human-field"><label class="switch"><input type="checkbox" id="p-human" aria-label="Human task"><span></span></label><span class="hint">Agents skip it</span></span></div>
